@@ -167,7 +167,7 @@ public class TelegramBot extends TelegramLongPollingBot {
         if (chatId == 1313359155)
             adminName = "Владимир Сергеевич";
         else adminName = "Иван Андреевич";
-        String hiAdminMesEmoji = "Здравствуйте, " + adminName + "!\n " +
+        String hiAdminMesEmoji = "Здравствуйте, " + adminName + "!!!\n " +
                 "В нашем боте:\n" + usersCount() + " пользователей;\n" +
                 activeTripCount() + " активных поездок;\n " +
                 finalTripCount() + " завершенных поездок.";
