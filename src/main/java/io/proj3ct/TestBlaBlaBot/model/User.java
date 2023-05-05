@@ -2,7 +2,10 @@ package io.proj3ct.TestBlaBlaBot.model;
 
 import javax.persistence.Entity;
 import javax.persistence.Id;
+import javax.persistence.ManyToMany;
+import javax.persistence.OneToMany;
 import java.sql.Timestamp;
+import java.util.Set;
 
 @Entity(name="usersDataTable")
 public class User {
@@ -25,6 +28,7 @@ public class User {
     private String lastName;
     private String userName;
     private Timestamp registeredAt;
+
 
     public Long getCharId() {
         return charId;
