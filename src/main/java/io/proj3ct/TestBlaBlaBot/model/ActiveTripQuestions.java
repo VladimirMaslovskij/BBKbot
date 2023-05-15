@@ -20,6 +20,22 @@ public class ActiveTripQuestions {
     private Double latFrom;
     private Double longTo;
     private Double latTo;
+    private boolean isActive;
+    public String getTripInfo() {
+        StringBuilder str = new StringBuilder("Дата: " + this.getDateFormat() + ";\n");
+        str.append("Откуда: " + this.getCityFrom() + ";\n");
+        str.append("Куда: " + this.getCityTo() + ".\n");
+        String message = String.valueOf(str);
+        return message;
+    }
+
+    public boolean isActive() {
+        return isActive;
+    }
+
+    public void setActive(boolean active) {
+        isActive = active;
+    }
 
     public Double getLongFrom() {
         return longFrom;

@@ -5,6 +5,7 @@ import javax.persistence.Id;
 import javax.persistence.ManyToMany;
 import javax.persistence.OneToMany;
 import java.sql.Timestamp;
+import java.text.DecimalFormat;
 import java.util.Set;
 
 @Entity(name="usersDataTable")
@@ -28,6 +29,36 @@ public class User {
     private String lastName;
     private String userName;
     private Timestamp registeredAt;
+    private int reviewCount;
+    private int reviewSum;
+    private Double rating;
+    private boolean isWhite;
+    private boolean isBan;
+
+    public boolean isWhite() {
+        return isWhite;
+    }
+
+    public void setWhite(boolean white) {
+        isWhite = white;
+    }
+
+    public boolean isBan() {
+        return isBan;
+    }
+
+    public void setBan(boolean ban) {
+        isBan = ban;
+    }
+
+    private void setRating(int review) {
+        this.reviewCount++;
+        this.reviewSum = reviewSum + review;
+        this.rating = (double) reviewSum / (double) reviewCount;
+    }
+    private String getRating() {
+        return new DecimalFormat("#0.00").format(this.rating);
+    }
 
 
     public Long getCharId() {
