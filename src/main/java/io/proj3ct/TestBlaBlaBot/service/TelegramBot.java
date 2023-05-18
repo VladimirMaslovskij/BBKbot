@@ -5,17 +5,18 @@ import io.proj3ct.TestBlaBlaBot.config.BotConfig;
 import io.proj3ct.TestBlaBlaBot.config.MyGeocoder;
 import io.proj3ct.TestBlaBlaBot.model.*;
 import lombok.extern.slf4j.Slf4j;
+import org.locationtech.jts.triangulate.tri.Tri;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
-import org.telegram.telegrambots.meta.api.methods.send.SendVenue;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
 import org.telegram.telegrambots.meta.api.objects.Location;
 import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.Update;
-import org.telegram.telegrambots.meta.api.objects.Venue;
 import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
 import org.telegram.telegrambots.meta.api.objects.commands.scope.BotCommandScopeDefault;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
@@ -31,6 +32,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 
+@EnableScheduling
 @Slf4j
 @Component
 public class TelegramBot extends TelegramLongPollingBot {
@@ -43,6 +45,16 @@ public class TelegramBot extends TelegramLongPollingBot {
     static final String START_TRIP = "startTrip";
     static final String ERROR_TEXT = "Error occurred: ";
     static final String NO_COMMENT = "noComment";
+    static final String ALL_TRIPS = "allTrips";
+    static final String TO_BOOK = "toBook";
+    static final String SITS = "sits";
+    static final String TRIP_WAS = "tripWas";
+    static final String TRIP_NOT_WAS = "tripNotWas";
+    static final String SKIP_ASK = "skipAsk";
+    static final String RATE_DRIVER = "rateDriver";
+    static final String DELETE_TRIP = "deleteTrip";
+    static final String DELETE_QUESTION = "deleteQuestion";
+    static final String DELETE_BOOK = "deleteBook";
     private boolean isUserWriteLikePassenger = false;
     private boolean isUserWriteLikePassengerTo = false;
     private boolean isUserWriteLikePassengerWhen = false;
@@ -53,6 +65,7 @@ public class TelegramBot extends TelegramLongPollingBot {
     private boolean isUserWriteLikeDriverHowMuchSits = false;
     private boolean isUserWriteLikeDriverAuto = false;
     private boolean isUserWriteLikeDriverComment = false;
+    private boolean isShowing = false;
     @Autowired
     private UserRepository userRepository;
 
@@ -78,6 +91,7 @@ public class TelegramBot extends TelegramLongPollingBot {
         this.config = config;
         List<BotCommand> listOfCommands = new ArrayList<>();
         listOfCommands.add(new BotCommand("/start", "Новая поездка."));
+        listOfCommands.add(new BotCommand("/find", "Доступные поездки"));
         listOfCommands.add(new BotCommand("/history", "Спланированные поездки."));
         listOfCommands.add(new BotCommand("/help", "Инструкция по использованию бота."));
         try {
@@ -106,8 +120,11 @@ public class TelegramBot extends TelegramLongPollingBot {
         }
     }
 
-    private void driverSkipComment(Update update) {
+    private void driverSkipComment(Update update, Integer messageId) {
         if (update.getCallbackQuery().getData().equals(NO_COMMENT)) {
+            Long chatId = update.getCallbackQuery().getMessage().getChatId();
+            String info = "Ваша поездка спланирована, информацию о ней вы можете найти " +
+                    "в меню, в разделе /history.";
             Long tripId = checkTripId(update.getCallbackQuery().getMessage().getChatId());
             TripActive tripActive = getTripActive(tripId);
             tripActive.setActive(true);
@@ -120,9 +137,7 @@ public class TelegramBot extends TelegramLongPollingBot {
             isUserWriteLikeDriverHowMuchSits = false;
             isUserWriteLikeDriverAuto = false;
             isUserWriteLikeDriverComment = false;
-            sendMessage(update.getCallbackQuery().getMessage().getChatId(),
-                    "Ваша поездка спланирована, информацию о ней вы можете найти " +
-                    "в меню, в разделе /history.");
+            executeEditMessageText(info, chatId, messageId);
         }
     }
 
@@ -175,7 +190,7 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     private void driverLogicImplementation(Update update) {
         if (update.hasCallbackQuery()) {
-            driverSkipComment(update);
+            driverSkipComment(update, update.getCallbackQuery().getMessage().getMessageId());
         } else {
             var chatId = update.getMessage().getChatId();
             var text = update.getMessage().getText();
@@ -329,7 +344,7 @@ public class TelegramBot extends TelegramLongPollingBot {
                 trip.setDateFormat("01.01.1991");
                 tripRepository.save(trip);
                 isUserWriteLikePassengerTo = true;
-                sendMessage(chatId, "Введите куда вы поедете:");
+                sendMessage(chatId, "Введите куда вы хотите поехать:");
             } else if (!isUserWriteLikePassengerWhen && isUserWriteLikePassengerTo) {
                 Location location = update.getMessage().getLocation();
                 String address = createLocationFromCoordinates(chatId, location);
@@ -355,7 +370,7 @@ public class TelegramBot extends TelegramLongPollingBot {
                 if (new Date().getTime() > newDate.getTime() + 86400000) {
                     sendMessage(chatId, "Нельзя вводить уже прошедшую дату, попробуйте еще раз.");
                 } else {
-                    String mes = "Ваша поездка запланирована на:";
+                    String mes = "Ваша заявка на поездку сформирована и спланирована на:";
                     sendMessage(chatId, mes);
                     sendMessage(chatId, text);
                     ActiveTripQuestions trip = getActiveQuestion(tripId);
@@ -366,6 +381,23 @@ public class TelegramBot extends TelegramLongPollingBot {
                     isUserWriteLikePassengerTo = false;
                     isUserWriteLikePassengerWhen = false;
                     isUserWriteLikePassenger = false;
+                    String finalMes = "Вы можете посмотреть информацию о вашей заявке в разделе /history, " +
+                            "чтобы посмотреть все активные спланированные поездки, нажмите \"Поездки\"";
+                    SendMessage sendMessage = new SendMessage();
+                    sendMessage.setText(finalMes);
+                    sendMessage.setChatId(chatId);
+                    InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+                    List<List<InlineKeyboardButton>> rowsLine = new ArrayList<>();
+                    List<InlineKeyboardButton> upRow = new ArrayList<>();
+                    InlineKeyboardButton inlineKeyboardButtonNoComment = InlineKeyboardButton.builder()
+                            .callbackData(ALL_TRIPS)
+                            .text("Поездки")
+                            .build();
+                    upRow.add(inlineKeyboardButtonNoComment);
+                    rowsLine.add(upRow);
+                    markup.setKeyboard(rowsLine);
+                    sendMessage.setReplyMarkup(markup);
+                    executeMessage(sendMessage);
                 }
             }
     }
@@ -454,7 +486,21 @@ public class TelegramBot extends TelegramLongPollingBot {
         sendMessage(chatId, answer);
         for (ActiveTripQuestions trip : trips) {
             if (trip.getPassengerId().equals(chatId)) {
-                sendMessage(chatId, trip.getTripInfo());
+                SendMessage sendMessage = new SendMessage();
+                sendMessage.setText(trip.getTripInfo());
+                sendMessage.setChatId(chatId);
+                InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+                List<List<InlineKeyboardButton>> rowsLine = new ArrayList<>();
+                List<InlineKeyboardButton> upRow = new ArrayList<>();
+                InlineKeyboardButton inlineKeyboardButtonNoComment = InlineKeyboardButton.builder()
+                        .callbackData(DELETE_QUESTION + "/" + trip.getTripId())
+                        .text("Удалить")
+                        .build();
+                upRow.add(inlineKeyboardButtonNoComment);
+                rowsLine.add(upRow);
+                markup.setKeyboard(rowsLine);
+                sendMessage.setReplyMarkup(markup);
+                executeMessage(sendMessage);
             }
         }
         log.info("Request a history of trips");
@@ -465,7 +511,62 @@ public class TelegramBot extends TelegramLongPollingBot {
         sendMessage(chatId, answer);
         for (TripActive trip : trips) {
             if (trip.getDriver().equals(chatId)) {
-                sendMessage(chatId, trip.getTripInfo());
+                SendMessage sendMessage = new SendMessage();
+                StringBuilder str = new StringBuilder(trip.getTripInfo());
+                if (trip.tripHasPassengers()) {
+                    String finalMes = "Ваши пассажиры: ";
+                    str.append(finalMes);
+                    List<String> passengersNames = trip.getPassengersNames();
+                    for (int i = 0; i < passengersNames.size(); i++) {
+                        str.append("@" + passengersNames.get(i));
+                    }
+                }
+                sendMessage.setChatId(chatId);
+                sendMessage.setText(String.valueOf(str));
+                InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+                List<List<InlineKeyboardButton>> rowsLine = new ArrayList<>();
+                List<InlineKeyboardButton> upRow = new ArrayList<>();
+                    InlineKeyboardButton inlineKeyboardButtonNoComment = InlineKeyboardButton.builder()
+                            .callbackData(DELETE_TRIP + "/" + trip.getTripId())
+                            .text("Удалить")
+                            .build();
+                    upRow.add(inlineKeyboardButtonNoComment);
+                rowsLine.add(upRow);
+                markup.setKeyboard(rowsLine);
+                sendMessage.setReplyMarkup(markup);
+                executeMessage(sendMessage);
+            }
+        }
+        log.info("Request a history of trips");
+    }
+    private void getBookingTrips(long chatId) {
+        User user = getUserByChatId(chatId);
+        List<Long> ids = user.getMyBookingTrips();
+        Iterable<TripActive> trips = tripActiveRepository.findAllById(ids);
+        String answer = "Ваши забронированные поездки:\n";
+        sendMessage(chatId, answer);
+        for (TripActive trip : trips) {
+            if (trip.getDriver().equals(chatId)) {
+                SendMessage sendMessage = new SendMessage();
+                StringBuilder str = new StringBuilder(trip.getTripInfo());
+                    String finalMes = "Водитель: ";
+                    str.append(finalMes);
+                    String driver = "@" + getUserByChatId(trip.getDriverId()).getUserName();
+                    str.append(driver);
+                sendMessage.setChatId(chatId);
+                sendMessage.setText(String.valueOf(str));
+                InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+                List<List<InlineKeyboardButton>> rowsLine = new ArrayList<>();
+                List<InlineKeyboardButton> upRow = new ArrayList<>();
+                InlineKeyboardButton inlineKeyboardButtonNoComment = InlineKeyboardButton.builder()
+                        .callbackData(DELETE_BOOK + "/" + trip.getTripId())
+                        .text("Отменить бронь")
+                        .build();
+                upRow.add(inlineKeyboardButtonNoComment);
+                rowsLine.add(upRow);
+                markup.setKeyboard(rowsLine);
+                sendMessage.setReplyMarkup(markup);
+                executeMessage(sendMessage);
             }
         }
         log.info("Request a history of trips");
@@ -556,8 +657,12 @@ public class TelegramBot extends TelegramLongPollingBot {
         long chatId = update.getMessage().getChatId();
 
         if (messageText.contains("/send") && (checkAdmin(chatId))) {
-            tripActiveRepository.deleteById(13133591553L);
-            tripActiveRepository.deleteById(13133591554L);
+            User user = getUserByChatId(1313359155L);
+            user.setMyBookingTrips("");
+            user.setCounterBookingTrips();
+            userRepository.save(user);
+            tripActiveRepository.deleteById(13133591551L);
+            tripActiveRepository.deleteById(13133591552L);
 //            var textToSend = EmojiParser.parseToUnicode(messageText.substring(messageText.indexOf(" ")));
 //            var users = userRepository.findAll();
 //            for (User user : users) {
@@ -577,16 +682,39 @@ public class TelegramBot extends TelegramLongPollingBot {
                 case "/history":
                     getPassengerHistory(chatId);
                     getDriverHistory(chatId);
+                    getBookingTrips(chatId);
                     break;
                 case "/help":
                     sendMessage(chatId, HELP_TEXT);
                     log.info("Request info");
+                    break;
+                case "/find":
+                    if (isUserHasTripQuestion(chatId)) {
+                        showAllTrips(chatId);
+                        isShowing = true;
+                    }
+                    else
+                        sendMessage(chatId, "Чтобы просматривать доступные поездки необходимо " +
+                                "создать заявку на поездку, для этого нажмите /start и выбирите \"Попутчик\"");
                     break;
                 default:
                     sendMessage(chatId, "Извините, такой команды не существует.");
             }
         }
     }
+
+    private boolean isUserHasTripQuestion(Long chatId) {
+//        String chatIdStr = String.valueOf(chatId * 10);
+        String chatIdStr = String.valueOf(chatId);
+        boolean result = false;
+        for (int i = 1; i < 5; i++) {
+            Long id = Long.valueOf(chatIdStr + i);
+            if (tripRepository.existsById(id))
+                result = true;
+        }
+        return result;
+    }
+
     private void botLogicIfUpdateIsCallback(Update update) {
         String callbackData = update.getCallbackQuery().getData();
         long messageId = update.getCallbackQuery().getMessage().getMessageId();
@@ -602,7 +730,7 @@ public class TelegramBot extends TelegramLongPollingBot {
                     "Для повышения допустимого количества активных поездок обратитесь к администрации бота: " +
                     "@kl_ms или @vladimir_816.");
         } else if (callbackData.equals(PASSENGER)) {
-            if ((checkQuestionId(chatId) != null) || isUserInWhiteList(chatId)) {
+            if ((checkQuestionId(chatId) != null)) {
                 String text = "Начинаем составлять запрос на поездку:";
                 executeEditMessageText(text, chatId, messageId);
                 sendMessage(chatId, "Введите, откуда вы хотите поехать:");
@@ -615,10 +743,53 @@ public class TelegramBot extends TelegramLongPollingBot {
         } else if (callbackData.equals(SHOW_FINAL_TRIPS) && (checkAdmin(chatId))) {
             String message = "Завершенные поездки отсутствуют";
             sendMessage(chatId, message);
-        } else if (callbackData.equals(SHOW_ACTIVE_TRIPS) && (checkAdmin(chatId))) {
-            String message = "Активные поездки отсутствуют";
-            sendMessage(chatId, message);
-        } else if (callbackData.equals(START_TRIP) && (checkAdmin(chatId))) {
+        } else if (callbackData.equals(ALL_TRIPS)) {
+            showAllTrips(chatId, messageId);
+            isShowing = true;
+        }
+        else if (callbackData.equals(SHOW_ACTIVE_TRIPS) && (checkAdmin(chatId))) {
+            showAllTrips(chatId, messageId);
+        } else if (callbackData.startsWith(TO_BOOK) && isShowing) {
+            Long tripId = Long.valueOf(callbackData.split("/")[1]);
+            TripActive trip = getTripActive(tripId);
+            int countOfSits = trip.getCountOfSits();
+            isShowing = false;
+            setCountOfSits(chatId, countOfSits, tripId);
+        } else if (callbackData.startsWith(SITS)) {
+            int countOfSits = Integer.valueOf(callbackData.split("/")[1]);
+            Long tripId = Long.valueOf(callbackData.split("/")[2]);
+            toBookTrip(chatId, tripId, countOfSits, messageId);
+        } else if (callbackData.startsWith(DELETE_TRIP)) {
+            Long idDeletedTrip = Long.valueOf(callbackData.split("/")[1]);
+            deleteTripFromUser(chatId, idDeletedTrip, messageId);
+        } else if (callbackData.startsWith(DELETE_BOOK)) {
+            Long idDeletedBook = Long.valueOf(callbackData.split("/")[1]);
+            deleteBookFromUser(chatId, idDeletedBook, messageId);
+        }
+        else if (callbackData.startsWith(DELETE_QUESTION)) {
+            Long idDeletedTrip = Long.valueOf(callbackData.split("/")[1]);
+            deleteQuestionFromUser(chatId, idDeletedTrip, messageId);
+        } else if (callbackData.equals(SKIP_ASK)) {
+            executeEditMessageText("Спасибо за использование нашего бота, надеюсь мы еще не раз поможем" +
+                    " Вам добраться куда вы захотите", chatId, messageId);
+        } else if (callbackData.startsWith(TRIP_WAS)) {
+            Long driverId = Long.valueOf(callbackData.split("/")[1]);
+            estimationDriver(chatId, driverId, messageId);
+        }
+        else if (callbackData.startsWith(TRIP_NOT_WAS)) {
+            Long driverId = Long.valueOf(callbackData.split("/")[1]);
+            askAboutReason(chatId, driverId, messageId);
+        }
+        else if (callbackData.startsWith(RATE_DRIVER)) {
+            int driverRate = Integer.valueOf(callbackData.split("/")[1]);
+            Long driverId = Long.valueOf(callbackData.split("/")[2]);
+            User user = getUserByChatId(driverId);
+            user.setRating(driverRate);
+            userRepository.save(user);
+            executeEditMessageText("Спасибо за использование нашего бота, надеюсь мы еще не раз поможем" +
+                    "Вам добраться куда вы захотите", chatId, messageId);
+        }
+        else if (callbackData.equals(START_TRIP) && (checkAdmin(chatId))) {
             String text = EmojiParser.parseToUnicode("Уважаемый шеф, " + ":sunglasses:"
                     + " вы сегодня за рулем или на диванчике сзади?");
             EditMessageText message = new EditMessageText();
@@ -648,6 +819,222 @@ public class TelegramBot extends TelegramLongPollingBot {
             }
         }
     }
+
+    private void deleteBookFromUser(long chatId, Long idDeletedBook, long messageId) {
+        TripActive tripActive = getTripActive(idDeletedBook);
+        User user = getUserByChatId(chatId);
+        String text = "Бронирование отменено.";
+        int countOfSits = 0;
+        System.out.println(String.valueOf(chatId) +"   " + String.valueOf(idDeletedBook));
+        tripActive.deletePassengerName(user.getUserName());
+        List<String> passangers = tripActive.getPassengers();
+        System.out.println(passangers);
+        StringBuilder newPassengers = new StringBuilder();
+        for (String pasInfo: passangers) {
+            if (pasInfo.startsWith(String.valueOf(chatId))) {
+                countOfSits = Integer.parseInt(pasInfo.split("_")[1]);
+            }
+            else newPassengers.append(pasInfo);
+        }
+        user.deleteMyBookingTrip(String.valueOf(tripActive.getTripId()));
+        tripActive.setPassenger(String.valueOf(newPassengers));
+        tripActive.setCountOfSits(tripActive.getCountOfSits() + countOfSits);
+        tripActiveRepository.save(tripActive);
+        userRepository.save(user);
+        executeEditMessageText(text, chatId, messageId);
+    }
+
+    private void askAboutReason(long chatId, Long driverId, long messageId) {
+        EditMessageText messageText = new EditMessageText();
+        messageText.setText("Если поездка не состоялась по причине того, что водитель:\n" +
+                "- не вышел на связь;\n" +
+                "- передумал в последний момент и не оповестил Вас;\n" +
+                "- уехал без вас;\n" +
+                "- отказал Вам без причины,\n" +
+                "то нажмите \"Из-за водителя\"\n" +
+                "Если поездка не состоялась по другой причине, нажмите \"Из-за меня\" или \"Пропустить\"");
+        messageText.setChatId(chatId);
+        messageText.setMessageId((int) messageId);
+        InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rowsLine = new ArrayList<>();
+        List<InlineKeyboardButton> upRow = new ArrayList<>();
+        List<InlineKeyboardButton> downRow = new ArrayList<>();
+            InlineKeyboardButton driverBad = InlineKeyboardButton.builder()
+                    .callbackData(RATE_DRIVER + "/" + 1 + "/" + driverId)
+                    .text("Из-за водителя")
+                    .build();
+            upRow.add(driverBad);
+        InlineKeyboardButton meBad = InlineKeyboardButton.builder()
+                .callbackData(SKIP_ASK)
+                .text("Из-за меня")
+                .build();
+        upRow.add(meBad);
+        InlineKeyboardButton skip = InlineKeyboardButton.builder()
+                .callbackData(SKIP_ASK)
+                .text("Пропустить")
+                .build();
+        rowsLine.add(upRow);
+        downRow.add(skip);
+        rowsLine.add(downRow);
+        markup.setKeyboard(rowsLine);
+        messageText.setReplyMarkup(markup);
+        try {
+            execute(messageText);
+        } catch (TelegramApiException e) {
+            log.error(ERROR_TEXT + e.getMessage());
+        }
+    }
+
+    private void estimationDriver(long chatId, Long driverId, long messageId) {
+        EditMessageText messageText = new EditMessageText();
+        messageText.setText("Пожалуйста, оцените водителя и саму поездку по 5-бальной шкале: ");
+        messageText.setChatId(chatId);
+        messageText.setMessageId((int) messageId);
+        InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rowsLine = new ArrayList<>();
+        List<InlineKeyboardButton> upRow = new ArrayList<>();
+        List<InlineKeyboardButton> downRow = new ArrayList<>();
+        for (int i = 1; i <= 5; i++) {
+            InlineKeyboardButton inlineKeyboardButtonNoComment = InlineKeyboardButton.builder()
+                    .callbackData(RATE_DRIVER + "/" + i + "/" + driverId)
+                    .text(String.valueOf(i))
+                    .build();
+            upRow.add(inlineKeyboardButtonNoComment);
+        }
+        InlineKeyboardButton skip = InlineKeyboardButton.builder()
+                .callbackData(SKIP_ASK)
+                .text("Пропустить")
+                .build();
+        rowsLine.add(upRow);
+        downRow.add(skip);
+        rowsLine.add(downRow);
+        markup.setKeyboard(rowsLine);
+        messageText.setReplyMarkup(markup);
+        try {
+            execute(messageText);
+        } catch (TelegramApiException e) {
+            log.error(ERROR_TEXT + e.getMessage());
+        }
+    }
+
+    private void deleteTripFromUser(long chatId, Long idDeletedTrip, long messageId) {
+        tripActiveRepository.deleteById(idDeletedTrip);
+        String text ="Поездка удалена";
+        executeEditMessageText(text, chatId, messageId);
+    }
+    private void deleteQuestionFromUser(long chatId, Long idDeletedTrip, long messageId) {
+        tripRepository.deleteById(idDeletedTrip);
+        String text ="Поездка удалена";
+        executeEditMessageText(text, chatId, messageId);
+    }
+
+    private void toBookTrip(long chatId, Long tripId, int countOfSits, long messageId) {
+        TripActive trip = getTripActive(tripId);
+        trip.addPassenger(String.valueOf(chatId), countOfSits);
+        User passenger = getUserByChatId(chatId);
+        passenger.addMyBookingTrip(tripId);
+        trip.addPassengerName(passenger.getUserName());
+        trip.setCountOfSits(trip.getCountOfSits() - countOfSits);
+        String driverName = findUserNameById(trip.getDriverId());
+        tripActiveRepository.save(trip);
+        userRepository.save(passenger);
+        String text ="Поездка забронирована. Чтобы посмотреть детали поездки, зайдите в раздел " +
+                "/history, что бы связаться с водителем - напишите ему: @" + driverName;
+        executeEditMessageText(text, chatId, messageId);
+        sendMessage(trip.getDriverId(), "Мы нашли пассажира к вашей поездке!\n" +
+                "Можете прямо сейчас написать ему для уточнения деталей: @" + passenger.getUserName() + "" +
+                ", либо позже он сам напишет вам.");
+    }
+
+    private User getUserByChatId(long chatId) {
+        Optional<User> users = userRepository.findById(chatId);
+        if (users.isPresent()) {
+            User user = users.get();
+            return user;
+        }
+        return null;
+    }
+
+    private void setCountOfSits(Long chatId, int countOfSits, Long tripId) {
+        SendMessage sendMessage = new SendMessage();
+        sendMessage.setText("Выберите количество мест: ");
+        sendMessage.setChatId(chatId);
+        InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rowsLine = new ArrayList<>();
+        List<InlineKeyboardButton> upRow = new ArrayList<>();
+        for (int i = 1; i <= countOfSits; i++) {
+            InlineKeyboardButton inlineKeyboardButtonNoComment = InlineKeyboardButton.builder()
+                    .callbackData(SITS + "/" + i + "/" + tripId)
+                    .text(String.valueOf(i))
+                    .build();
+            upRow.add(inlineKeyboardButtonNoComment);
+        }
+        rowsLine.add(upRow);
+        markup.setKeyboard(rowsLine);
+        sendMessage.setReplyMarkup(markup);
+        executeMessage(sendMessage);
+    }
+
+    private void showAllTrips(Long chatId, long messageId) {
+        String finalMes = "Чтобы забронировать поездку нажмите кнопку \"Забронировать\" " +
+                "и выберите количество необходимых мест.";
+        sendMessage(chatId, finalMes);
+        var trips = tripActiveRepository.findAll();
+        for (TripActive trip : trips) {
+            if ((trip.isActive()) && (trip.getCountOfSits() > 0)
+                //&& !(trip.getPassengers().contains(chatId)) && (trip.getDriverId() != chatId)
+            ) {
+                EditMessageText sendMessage = new EditMessageText();
+                sendMessage.setText(trip.getTripInfo());
+                sendMessage.setChatId(chatId);
+                sendMessage.setMessageId((int) messageId);
+                InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+                List<List<InlineKeyboardButton>> rowsLine = new ArrayList<>();
+                List<InlineKeyboardButton> upRow = new ArrayList<>();
+                InlineKeyboardButton inlineKeyboardButtonNoComment = InlineKeyboardButton.builder()
+                        .callbackData(TO_BOOK + "/" + trip.getTripId())
+                        .text("Забронировать")
+                        .build();
+                upRow.add(inlineKeyboardButtonNoComment);
+                rowsLine.add(upRow);
+                markup.setKeyboard(rowsLine);
+                sendMessage.setReplyMarkup(markup);
+                try {
+                    execute(sendMessage);
+                } catch (TelegramApiException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        }
+    }
+    private void showAllTrips(Long chatId) {
+        String finalMes = "Чтобы забронировать поездку нажмите кнопку \"Забронировать\" " +
+                "и выберите количество необходимых мест.";
+        sendMessage(chatId, finalMes);
+        var trips = tripActiveRepository.findAll();
+        for (TripActive trip : trips) {
+            if ((trip.isActive()) && (trip.getCountOfSits() > 0)
+            //&& !(trip.getPassengers().contains(chatId)) && (trip.getDriverId() != chatId)
+            ) {
+                SendMessage sendMessage = new SendMessage();
+                sendMessage.setText(trip.getTripInfo());
+                sendMessage.setChatId(chatId);
+                InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+                List<List<InlineKeyboardButton>> rowsLine = new ArrayList<>();
+                List<InlineKeyboardButton> upRow = new ArrayList<>();
+                InlineKeyboardButton inlineKeyboardButtonNoComment = InlineKeyboardButton.builder()
+                        .callbackData(TO_BOOK + "/" + trip.getTripId())
+                        .text("Забронировать")
+                        .build();
+                upRow.add(inlineKeyboardButtonNoComment);
+                rowsLine.add(upRow);
+                markup.setKeyboard(rowsLine);
+                sendMessage.setReplyMarkup(markup);
+                executeMessage(sendMessage);
+            }
+        }
+    }
+
     private Long checkTripId(Long chatId) {
         int maxTrips;
         if (isUserInWhiteList(chatId)) {
@@ -693,11 +1080,13 @@ public class TelegramBot extends TelegramLongPollingBot {
         }
         Iterable<ActiveTripQuestions> trips = tripRepository.findAllById(ids);
         for (ActiveTripQuestions trip : trips) {
-            if (trip.isActive())
+            if (trip.isActive()) {
                 counter++;
+                ids.remove(trip.getTripId());
+            }
         }
         if (((result + counter > result) && (result + counter <= chatId)) || (counter == 1L))
-            return result + counter;
+            return ids.get(0);
         else return null;
     }
     private void addUserToWhiteLIst(Long userId) {
@@ -735,5 +1124,114 @@ public class TelegramBot extends TelegramLongPollingBot {
             return user.isWhite();
         }
         return false;
+    }
+    @Scheduled(cron = "${interval-in-cron}")
+    private void checkCompletedTrips() throws ParseException {
+//        askAboutTrip();
+        deleteActiveTrips();
+        remindAboutTrips();
+        sendMessage(1313359155, "Завершенные поездки или поездки с истекшим временем были удалены.");
+    }
+
+    private void askAboutTrip() throws ParseException {
+        Date date = new Date();
+        SimpleDateFormat dateFormat = new SimpleDateFormat("dd.MM.yyyy/HH:mm");
+        Iterable<TripActive> tripsActive = tripActiveRepository.findAll();
+        for (TripActive trip : tripsActive) {
+            Date newDate = dateFormat.parse(trip.getTripDate());
+            if (newDate.getTime() < date.getTime()) {
+                List<String> passengersId = trip.getPassengers();
+                for (int i = 0; i < passengersId.size(); i++) {
+                    User user = getUserByChatId(Long.parseLong(passengersId.get(i).split("_")[0]));
+                    SendMessage message = new SendMessage();
+                    message.setChatId(user.getCharId());
+                    message.setText("У Вас вчера была запланирована поездка из " + trip.getCityFrom() +
+                            ", в " + trip.getCityTo() + ", подскажите пожалуйста состоялась" +
+                            " ли она? Ваш ответ поможет улучшить работу сервиса и определить порядочность водителя.");
+                    InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+                    List<List<InlineKeyboardButton>> rowsLine = new ArrayList<>();
+                    List<InlineKeyboardButton> upRow = new ArrayList<>();
+                    List<InlineKeyboardButton> downRow = new ArrayList<>();
+                    InlineKeyboardButton tripWas = InlineKeyboardButton.builder()
+                            .callbackData(TRIP_WAS + "/" + trip.getDriverId())
+                            .text("Состоялась")
+                            .build();
+                    InlineKeyboardButton tripNotWas = InlineKeyboardButton.builder()
+                            .callbackData(TRIP_NOT_WAS + "/" + trip.getDriverId())
+                            .text("Не состоялась")
+                            .build();
+                    InlineKeyboardButton skipAsk = InlineKeyboardButton.builder()
+                            .callbackData(SKIP_ASK)
+                            .text("Пропустить")
+                            .build();
+                    upRow.add(tripWas);
+                    upRow.add(tripNotWas);
+                    rowsLine.add(upRow);
+                    downRow.add(skipAsk);
+                    rowsLine.add(downRow);
+                    markup.setKeyboard(rowsLine);
+                    message.setReplyMarkup(markup);
+                    executeMessage(message);
+                }
+            }
+        }
+    }
+    private void deleteActiveTrips() throws ParseException {
+        Date date = new Date();
+        SimpleDateFormat dateFormat = new SimpleDateFormat("dd.MM.yyyy");
+        Date newDate;
+        System.out.println("Here");
+        Iterable<ActiveTripQuestions> trips = tripRepository.findAll();
+        List<Long> deletedIds = new ArrayList<>();
+        for (ActiveTripQuestions trip : trips) {
+            System.out.println("Here1");
+            newDate = dateFormat.parse(trip.getDateFormat());
+            if (newDate.getTime() < date.getTime()) {
+                System.out.println("Here2");
+                deletedIds.add(trip.getTripId());
+            }
+        }
+        for (Long id: deletedIds) {
+            tripRepository.deleteById(id);
+        }
+        dateFormat = new SimpleDateFormat("dd.MM.yyyy/HH:mm");
+        Iterable<TripActive> tripsActive = tripActiveRepository.findAll();
+        List<Long> deletedIdsTrips = new ArrayList<>();
+        for (TripActive trip : tripsActive) {
+            newDate = dateFormat.parse(trip.getTripDate());
+            if (newDate.getTime() < date.getTime()) {
+                List<String> passengersId = trip.getPassengers();
+                for (int i = 0; i < passengersId.size(); i++) {
+                    User user = getUserByChatId(Long.parseLong(passengersId.get(i).split("_")[0]));
+                    user.deleteMyBookingTrip(String.valueOf(trip.getTripId()));
+                    userRepository.save(user);
+                }
+                deletedIdsTrips.add(trip.getTripId());
+            }
+        }
+        for (Long id: deletedIdsTrips) {
+            tripActiveRepository.deleteById(id);
+        }
+    }
+    private void remindAboutTrips() throws ParseException {
+        Date date = new Date();
+        SimpleDateFormat dateFormat = new SimpleDateFormat("dd.MM.yyyy/HH:mm");
+        Date newDate;
+        Iterable<TripActive> tripsActive = tripActiveRepository.findAll();
+        for (TripActive trip : tripsActive) {
+            newDate = dateFormat.parse(trip.getTripDate());
+            if ((newDate.getTime() > date.getTime()) && (newDate.getTime() < date.getTime() + 86400000L)) {
+                List<String> passengersId = trip.getPassengers();
+                for (int i = 0; i < passengersId.size(); i++) {
+                    User user = getUserByChatId(Long.parseLong(passengersId.get(i).split("_")[0]));
+                    String time = trip.getTripDate().split("/")[1];
+                    String driverName = findUserNameById(trip.getDriver());
+                    sendMessage(user.getCharId(), "Напоминаю Вам о спланированной сегодня поездке в"
+                    + time +", для связи можете написать водителю: @" + driverName);
+                    sendMessage(trip.getTripId(), "Напоминаю Вам о спланированной сегодня поездке в"
+                            + time);
+                }
+            }
+        }
     }
 }

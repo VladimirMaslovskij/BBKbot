@@ -6,6 +6,8 @@ import javax.persistence.ManyToMany;
 import javax.persistence.OneToMany;
 import java.sql.Timestamp;
 import java.text.DecimalFormat;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 
 @Entity(name="usersDataTable")
@@ -34,6 +36,35 @@ public class User {
     private Double rating;
     private boolean isWhite;
     private boolean isBan;
+    private String myBookingTrips = "";
+    private int counterBookingTrips;
+    public void addMyBookingTrip(Long tripId) {
+        if (this.counterBookingTrips < 5) {
+            this.counterBookingTrips++;
+            this.myBookingTrips = this.myBookingTrips + tripId + "/";
+        }
+    }
+    public List<Long> getMyBookingTrips() {
+        List<String> tripsStr = List.of(this.myBookingTrips.split("/"));
+        List<Long> trips = new ArrayList<>();
+        for (int i = 0; i < tripsStr.size(); i++) {
+            trips.add(Long.valueOf(tripsStr.get(i)));
+        }
+        return trips;
+    }
+    public void setMyBookingTrips(String myBookingTrips) {
+        this.myBookingTrips = myBookingTrips;
+    }
+    public void setCounterBookingTrips() {
+        this.counterBookingTrips = 0;
+    }
+    public void deleteMyBookingTrip(String tripId) {
+        if (myBookingTrips.contains(tripId)) {
+        String newMyBookTrips = myBookingTrips.replace(tripId + "/", "");
+        myBookingTrips = newMyBookTrips;
+        counterBookingTrips--;
+        }
+    }
 
     public boolean isWhite() {
         return isWhite;
@@ -51,9 +82,9 @@ public class User {
         isBan = ban;
     }
 
-    private void setRating(int review) {
+    public void setRating(int review) {
         this.reviewCount++;
-        this.reviewSum = reviewSum + review;
+        this.reviewSum = this.reviewSum + review;
         this.rating = (double) reviewSum / (double) reviewCount;
     }
     private String getRating() {

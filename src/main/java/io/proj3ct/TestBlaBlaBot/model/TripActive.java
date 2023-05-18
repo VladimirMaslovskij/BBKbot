@@ -24,8 +24,31 @@ public class TripActive {
     private Double latFrom;
     private Double longTo;
     private Double latTo;
-    private String passengers;
+    private String passengers = null;
+    private String passengersNames;
     private boolean isActive;
+
+    public List<String> getPassengersNames() {
+        List<String> people = List.of(this.passengersNames.split("/"));
+        return people;
+    }
+    public boolean tripHasPassengers() {
+        if(this.passengers != null)
+            return true;
+        else return false;
+    }
+    public void deletePassengerName(String passengersName) {
+        if (this.passengersNames.contains(passengersName)) {
+            this.passengersNames = this.passengersNames.replace(passengersName + "/", "");
+        }
+    }
+    public void addPassengerName(String passengerName) {
+        if (this.passengersNames == null)
+            this.passengersNames = passengerName + "/";
+        else
+            this.passengersNames = this.passengersNames + passengerName + "/";
+    }
+
     public String getTripInfo() {
         String[] dateTime = this.getTripDate().split("/");
         StringBuilder str = new StringBuilder("Дата: " + dateTime[0] + ";\n");
@@ -47,8 +70,14 @@ public class TripActive {
         return people;
     }
 
-    public void addPassengers(String passengers) {
-        this.passengers = this.passengers + passengers + "/";
+    public void addPassenger(String passenger, int sitsToPassenger) {
+        if (this.passengers == null)
+            this.passengers = passenger + "_" + sitsToPassenger + "/";
+        else
+        this.passengers = this.passengers + passenger + "_" + sitsToPassenger + "/";
+    }
+    public void setPassenger(String passengers) {
+        this.passengers = passengers;
     }
 
     public boolean isActive() {
