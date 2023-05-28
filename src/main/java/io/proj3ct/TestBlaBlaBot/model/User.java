@@ -44,6 +44,9 @@ public class User {
             this.myBookingTrips = this.myBookingTrips + tripId + "/";
         }
     }
+    public int getReviewCount() {
+        return this.reviewCount;
+    }
     public List<Long> getMyBookingTrips() {
         List<String> tripsStr = List.of(this.myBookingTrips.split("/"));
         List<Long> trips = new ArrayList<>();
@@ -87,7 +90,7 @@ public class User {
         this.reviewSum = this.reviewSum + review;
         this.rating = (double) reviewSum / (double) reviewCount;
     }
-    private String getRating() {
+    public String getRating() {
         return new DecimalFormat("#0.00").format(this.rating);
     }
 

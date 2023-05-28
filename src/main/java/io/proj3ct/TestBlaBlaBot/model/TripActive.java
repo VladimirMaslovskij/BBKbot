@@ -69,6 +69,11 @@ public class TripActive {
         List<String> people = List.of(this.passengers.split("/"));
         return people;
     }
+    public boolean hasPassengers() {
+        if (this.passengers == null)
+            return false;
+        else return true;
+    }
 
     public void addPassenger(String passenger, int sitsToPassenger) {
         if (this.passengers == null)

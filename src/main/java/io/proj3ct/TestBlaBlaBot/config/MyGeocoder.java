@@ -53,7 +53,7 @@ public class MyGeocoder {
         String street = (String) address.getJSONObject(4).get("name");
         setStreet(street);
 //        String house = (String) address.getJSONObject(5).get("name");
-        String result = city + ", " + street;
+        String result = city;
         return result;
     }
 }
