@@ -1,5 +1,7 @@
 package io.proj3ct.TestBlaBlaBot.model;
 
+import com.vdurmont.emoji.EmojiParser;
+
 import javax.persistence.Entity;
 import javax.persistence.Id;
 import javax.persistence.ManyToMany;
@@ -33,7 +35,7 @@ public class TripActive {
         return people;
     }
     public boolean tripHasPassengers() {
-        if(this.passengers != null)
+        if(this.passengers != null && !this.passengers.equals(""))
             return true;
         else return false;
     }
@@ -51,15 +53,15 @@ public class TripActive {
 
     public String getTripInfo() {
         String[] dateTime = this.getTripDate().split("/");
-        StringBuilder str = new StringBuilder("Дата: " + dateTime[0] + ";\n");
-        str.append("Время: " + dateTime[1] + ";\n");
-        str.append("Откуда: " + this.getCityFrom() + ";\n");
-        str.append("Куда: " + this.getCityTo() + ".\n");
-        str.append("Автомобиль: " + this.getAuto() + ".\n");
-        str.append("Количество мест: " + this.getCountOfSits() + ".\n");
-        str.append("Стоимость за место: " + this.getTripPrice() + ".\n");
+        StringBuilder str = new StringBuilder(EmojiParser.parseToUnicode("Откуда" + ":round_pushpin:"
+                + ": " + this.getCityFrom() + ";\n" +
+                "Куда" + ":round_pushpin:" + ": " + this.getCityTo() + ".\n" +
+                "Автомобиль" + ":red_car:" + ": " + this.getAuto() + ".\n" +
+                "Количество мест" + ":busts_in_silhouette:" + ": " + this.getCountOfSits() + ".\n" +
+                "Стоимость за место" + ":moneybag:" + ": " + this.getTripPrice() + ".\n"));
         if (this.comment != null)
-            str.append("Пожелания к поездке: " + this.getComment() + ".\n");
+            str.append(EmojiParser.parseToUnicode("Пожелания к поездке" +
+                    ":writing_hand:" + ": " + this.getComment() + ".\n"));
         String message = String.valueOf(str);
         return message;
     }
@@ -68,11 +70,6 @@ public class TripActive {
     public List<String> getPassengers() {
         List<String> people = List.of(this.passengers.split("/"));
         return people;
-    }
-    public boolean hasPassengers() {
-        if (this.passengers == null)
-            return false;
-        else return true;
     }
 
     public void addPassenger(String passenger, int sitsToPassenger) {

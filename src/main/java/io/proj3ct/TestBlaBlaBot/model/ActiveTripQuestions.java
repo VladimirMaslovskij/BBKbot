@@ -1,5 +1,6 @@
 package io.proj3ct.TestBlaBlaBot.model;
 
+import com.vdurmont.emoji.EmojiParser;
 import org.telegram.telegrambots.meta.api.objects.Location;
 
 import javax.persistence.Entity;
@@ -22,9 +23,10 @@ public class ActiveTripQuestions {
     private Double latTo;
     private boolean isActive;
     public String getTripInfo() {
-        StringBuilder str = new StringBuilder("Дата: " + this.getDateFormat() + ";\n");
-        str.append("Откуда: " + this.getCityFrom() + ";\n");
-        str.append("Куда: " + this.getCityTo() + ".\n");
+        StringBuilder str = new StringBuilder(EmojiParser.parseToUnicode("Откуда" +
+                ":round_pushpin:" + ": " +
+                this.getCityFrom() + ";\n" +
+                "Куда" + ":round_pushpin:" + ": " + this.getCityTo() + ".\n"));
         String message = String.valueOf(str);
         return message;
     }
