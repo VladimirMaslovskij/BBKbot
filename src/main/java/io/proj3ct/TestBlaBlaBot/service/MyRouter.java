@@ -18,7 +18,7 @@ import java.util.Locale;
 public class MyRouter {
     GraphHopper hopper;
     public MyRouter() {
-        hopper = createGraphHopperInstance("src/main/resources/crimean-fed-district-latest.osm.pdf");
+        hopper = createGraphHopperInstance("crimean-fed-district-latest.osm.pbf");
 
     }
     public boolean isSuitableTo(Location pasTo, Location tripFrom, Location tripTo) {

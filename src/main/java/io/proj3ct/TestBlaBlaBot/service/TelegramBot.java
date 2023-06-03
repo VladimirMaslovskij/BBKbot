@@ -106,15 +106,17 @@ public class TelegramBot extends TelegramLongPollingBot {
             "     Для водителя необходимо:\n" +
             "1. В меню бота выбрать новую поездку (/start). Далее - вариант \"Водитель\" \n" +
             "2. Указать место отправления, место прибытия," +
-            " количество пассажиров, а также дату и время планируемой поездки.\n" +
-            "3. Внести оплату для формирования Вашей заявки в базу данных водителей.\n" +
+            " количество пассажиров, цену поездки для одного человека, а также дату и время планируемой поездки.\n" +
+            "3. Если есть пассажиры, которым Ваша поездка подходит, им автоматически будет разослано" +
+            " оповещение о Вашей поездке. После - Ваша поездка будет добавлена в базу поездок.\n" +
             "4. Ожидать ответа от бота, когда найдутся ваши попутчики. \n" +
             "     Для пассажира необходимо:\n" +
             "1. В меню бота выбрать новую поездку (/start). Далее - вариант \"Пассажир\" \n" +
             "2. Выбрать место отправления, место прибытия, а также дату.\n" +
             "3. Ожидать ответа от бота с вариантами возможных поездок.\n";
-    static final String INFO_PHOTO_TEXT = "Для выбора точки нажмите на вложения (1), далее на кнопку выбора " +
-            "гелокации (2) и выберите точку на карте или введите адрес, нажав на иконку лупы.";
+    static final String INFO_PHOTO_TEXT = EmojiParser.parseToUnicode("Для выбора точки " +
+            "нажмите на вложения" + ":paperclip:" + " (1), далее на кнопку выбора " +
+            "гелокации (2) и выберите точку на карте или введите адрес, нажав на иконку " + ":mag:" + " лупы.");
 
     public TelegramBot(BotConfig config) {
         this.config = config;
@@ -1688,8 +1690,17 @@ public class TelegramBot extends TelegramLongPollingBot {
         var trips = tripRepository.findAll();
         for (ActiveTripQuestions trip : trips) {
             if ((trip.isActive())) {
+                String month = trip.getDateFormat().split("\\.")[0];
+                String thisMonth = months.get(Integer.parseInt(month));
+                String secondSide = trip.getDateFormat().split("\\.")[1];
+                String day = secondSide.split("/")[0];
+                StringBuilder stringBuilder = new StringBuilder(EmojiParser.parseToUnicode("Дата" +
+                        " поездки: \n" +
+                        "Месяц" + ":date:" +": " + thisMonth + ", " +
+                        "День: " + day +"\n"));
+                stringBuilder.append(trip.getTripInfo());
                 SendMessage message = new SendMessage();
-                message.setText(trip.getTripInfo());
+                message.setText(String.valueOf(stringBuilder));
                 message.setChatId(chatId);
                 InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
                 List<List<InlineKeyboardButton>> rowsLine = new ArrayList<>();
@@ -1982,33 +1993,13 @@ public class TelegramBot extends TelegramLongPollingBot {
                     User user = getUserByChatId(Long.parseLong(passengersId.get(i).split("_")[0]));
                     String time = trip.getTripDate().split("/")[1];
                     String driverName = findUserNameById(trip.getDriver());
-                    sendMessage(user.getCharId(), "Напоминаю Вам о спланированной сегодня поездке в"
+                    sendMessage(user.getCharId(), "Напоминаю Вам о спланированной сегодня поездке в "
                             + time +", для связи можете написать водителю: @" + driverName);
-                    sendMessage(trip.getTripId(), "Напоминаю Вам о спланированной сегодня поездке в"
+                    sendMessage(trip.getDriverId(), "Напоминаю Вам о спланированной сегодня поездке в "
                             + time);
                 }
             }
         }
-
-//        Date date = new Date();
-//        SimpleDateFormat dateFormat = new SimpleDateFormat("MM.dd/kk:mm");
-//        Date newDate;
-//        Iterable<TripActive> tripsActive = tripActiveRepository.findAll();
-//        for (TripActive trip : tripsActive) {
-//            newDate = dateFormat.parse(trip.getTripDate());
-//            if ((newDate.getTime() > date.getTime()) && (newDate.getTime() < date.getTime() + 86400000L)) {
-//                List<String> passengersId = trip.getPassengers();
-//                for (int i = 0; i < passengersId.size(); i++) {
-//                    User user = getUserByChatId(Long.parseLong(passengersId.get(i).split("_")[0]));
-//                    String time = trip.getTripDate().split("/")[1];
-//                    String driverName = findUserNameById(trip.getDriver());
-//                    sendMessage(user.getCharId(), "Напоминаю Вам о спланированной сегодня поездке в"
-//                    + time +", для связи можете написать водителю: @" + driverName);
-//                    sendMessage(trip.getTripId(), "Напоминаю Вам о спланированной сегодня поездке в"
-//                            + time);
-//                }
-//            }
-//        }
     }
     private List<ActiveTripQuestions> checkQuestionToSuitable(TripActive tripActive, String cityFrom,
                                                               String cityTo) {
@@ -2148,7 +2139,7 @@ public class TelegramBot extends TelegramLongPollingBot {
         executeMessage(message);
     }
     private void sendInfoPhoto(Long chatId) {
-        File file = new File("src/main/resources/help.jpg");
+        File file = new File("help.jpg");
         SendPhoto sendPhoto = new SendPhoto();
         sendPhoto.setPhoto(new InputFile(file));
         sendPhoto.setChatId(chatId);
