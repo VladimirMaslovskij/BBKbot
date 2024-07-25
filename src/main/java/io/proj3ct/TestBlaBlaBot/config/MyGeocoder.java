@@ -30,7 +30,8 @@ public class MyGeocoder {
 
     public  String sendGeo(double longitude, double latitude) throws IOException {
 
-        String apiKey = "4db7b23a-c283-4c90-b507-fa77d8b7cf5a";
+        String apiKey = "2ff94181-aab3-45b8-93b6-080c30f80722";
+                // "4db7b23a-c283-4c90-b507-fa77d8b7cf5a"; - old api key
         String lang = "ru_RU";
         String geocode = longitude + "," + latitude;
         String url = "https://geocode-maps.yandex.ru/1.x/?apikey=" + apiKey +

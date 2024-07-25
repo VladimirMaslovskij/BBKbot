@@ -153,7 +153,9 @@ public class TelegramBot extends TelegramLongPollingBot {
                             || (update.getMessage().getText().contains("/prem"))
                             || (update.getMessage().getText().contains("/reset"))
                             || (update.getMessage().getText().contains("/unban"))
-                            || (update.getMessage().getText().contains("/unprem"))) {
+                            || (update.getMessage().getText().contains("/unprem"))
+                            || (update.getMessage().getText().contains("/podpiska"))
+                            || (update.getMessage().getText().contains("/remind"))) {
                         if (userRepository.existsById(update.getMessage().getChatId())) {
                             if (checkUserStatus(update.getMessage().getChatId()) &&
                                     !getUserByChatId(update.getMessage().getChatId()).isBan()) {
@@ -179,11 +181,15 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     private UserState checkUserState(Update update) {
         Long chatId = 0L;
-        if (update.hasCallbackQuery())
-            chatId = update.getCallbackQuery().getMessage().getChatId();
-        else if (update.hasMessage() && update.getMessage().hasText())
-            chatId = update.getMessage().getChatId();
-        else chatId = update.getMessage().getChatId();
+        try {
+            if (update.hasCallbackQuery())
+                chatId = update.getCallbackQuery().getMessage().getChatId();
+            else if (update.hasMessage() && update.getMessage().hasText())
+                chatId = update.getMessage().getChatId();
+            else chatId = update.getMessage().getChatId();
+        } catch (NullPointerException e) {
+            e.printStackTrace();
+        }
         UserState userState = new UserState();
         if (userStateRepository.findById(chatId).isEmpty()) {
             userState.setChatId(chatId);
@@ -345,7 +351,8 @@ public class TelegramBot extends TelegramLongPollingBot {
                 thisState.setUserWriteLikeDriverTo(true);
                 tripActiveRepository.save(trip);
                 userStateRepository.save(thisState);
-                sendInfoPhoto(chatId);
+                sendInfoPhotoTo(chatId);
+                sendMessage(chatId, "Введите населенный пункт, в который вы хотите поехать!");
                 askDriver(chatId, INFO_PHOTO_TEXT, tripId);
             } else if (!thisState.isUserWriteLikeDriverWhen() &&
                     thisState.isUserWriteLikeDriverTo() &&
@@ -373,7 +380,7 @@ public class TelegramBot extends TelegramLongPollingBot {
                 try {
                     System.out.println(dateFormat.parse(text));
                 } catch (ParseException e) {
-                    askDriver(chatId, "Введен неверный формат даты, попробуйте еще раз.", tripId);
+                    askDriver(chatId, "Введен неверный формат времени, попробуйте еще раз.", tripId);
                     throw new RuntimeException(e);
                 }
                 TripActive trip = getTripActive(tripId);
@@ -647,7 +654,10 @@ public class TelegramBot extends TelegramLongPollingBot {
         message.setText("Выберите месяц поездки");
         message.setChatId(chatId);
         int first = new Date().getMonth();
-        int second = first + 1;
+        int second = 0;
+        if (first < 11) {
+            second = first + 1;
+        }
         InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
         List<List<InlineKeyboardButton>> rowsLine = new ArrayList<>();
         List<InlineKeyboardButton> row = new ArrayList<>();
@@ -762,7 +772,8 @@ public class TelegramBot extends TelegramLongPollingBot {
                 tripRepository.save(trip);
                 thisState.setUserWriteLikePassengerTo(true);
                 userStateRepository.save(thisState);
-                sendInfoPhoto(chatId);
+                sendMessage(chatId, "Введите населенный пункт, в который вы хотите поехать!");
+                sendInfoPhotoTo(chatId);
                 askPassenger(chatId, INFO_PHOTO_TEXT, tripId);
             } else if (!thisState.isUserWriteLikePassengerWhen() && thisState.isUserWriteLikePassengerTo()) {
                 Location location = update.getMessage().getLocation();
@@ -883,7 +894,14 @@ public class TelegramBot extends TelegramLongPollingBot {
             var chat = message.getChat();
             User user = new User();
             user.setCharId(chatId);
-            user.setFirstName(chat.getFirstName());
+            String firstName;
+            try {
+                firstName = chat.getFirstName();
+//                user.setFirstName(chat.getFirstName());
+            } catch (RuntimeException e) {
+                firstName = "Уважаемый пользователь";
+            }
+            user.setFirstName(firstName);
             user.setLastName(chat.getLastName());
             user.setUserName(chat.getUserName());
             user.setRegisteredAt(new Timestamp(System.currentTimeMillis()));
@@ -995,12 +1013,25 @@ public class TelegramBot extends TelegramLongPollingBot {
                         "Время" + ":stopwatch:" + ": " + time + "\n"));
                 stringBuilder.append(trip.getTripInfo());
                 if (trip.tripHasPassengers()) {
+                    InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+                    List<List<InlineKeyboardButton>> rowsLine = new ArrayList<>();
                     String finalMes = "Ваши пассажиры: ";
                     stringBuilder.append(finalMes);
                     List<String> passengersNames = trip.getPassengersNames();
+                    List<String> passengersId = trip.getPassengers();
                     for (int i = 0; i < passengersNames.size(); i++) {
-                        stringBuilder.append("@" + passengersNames.get(i));
+                        stringBuilder.append("@" + passengersNames.get(i) + " ");
+                        List<InlineKeyboardButton> row = new ArrayList<>();
+                        InlineKeyboardButton contact;
+                        contact = InlineKeyboardButton.builder()
+                                .url("tg://user?id=" + passengersId.get(i))
+                                .text("Написать " + passengersNames.get(i) + "\uD83D\uDCE1")
+                                .build();
+                        row.add(contact);
+                        rowsLine.add(row);
                     }
+                    markup.setKeyboard(rowsLine);
+                    sendMessage.setReplyMarkup(markup);
                 }
                 sendMessage.setChatId(chatId);
                 sendMessage.setText(String.valueOf(stringBuilder));
@@ -1022,33 +1053,35 @@ public class TelegramBot extends TelegramLongPollingBot {
     }
     private void getBookingTrips(long chatId) {
         User user = getUserByChatId(chatId);
-        List<Long> ids = user.getMyBookingTrips();
-        Iterable<TripActive> trips = tripActiveRepository.findAllById(ids);
-        String answer = "Ваши забронированные поездки:\n";
-        sendMessage(chatId, answer);
-        for (TripActive trip : trips) {
-                SendMessage sendMessage = new SendMessage();
-                StringBuilder str = new StringBuilder(trip.getTripInfo());
+            List<Long> ids = user.getMyBookingTrips();
+            if (ids != null) {
+                Iterable<TripActive> trips = tripActiveRepository.findAllById(ids);
+                String answer = "Ваши забронированные поездки:\n";
+                sendMessage(chatId, answer);
+                for (TripActive trip : trips) {
+                    SendMessage sendMessage = new SendMessage();
+                    StringBuilder str = new StringBuilder(trip.getTripInfo());
                     String finalMes = "Водитель: ";
                     str.append(finalMes);
                     String driver = "@" + getUserByChatId(trip.getDriverId()).getUserName();
                     str.append(driver);
-                sendMessage.setChatId(chatId);
-                sendMessage.setText(String.valueOf(str));
-                InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
-                List<List<InlineKeyboardButton>> rowsLine = new ArrayList<>();
-                List<InlineKeyboardButton> upRow = new ArrayList<>();
-                InlineKeyboardButton inlineKeyboardButtonNoComment = InlineKeyboardButton.builder()
-                        .callbackData(DELETE_BOOK + "/" + trip.getTripId())
-                        .text("Отменить бронь")
-                        .build();
-                upRow.add(inlineKeyboardButtonNoComment);
-                rowsLine.add(upRow);
-                markup.setKeyboard(rowsLine);
-                sendMessage.setReplyMarkup(markup);
-                executeMessage(sendMessage);
-        }
-        log.info("Request a history of trips");
+                    sendMessage.setChatId(chatId);
+                    sendMessage.setText(String.valueOf(str));
+                    InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+                    List<List<InlineKeyboardButton>> rowsLine = new ArrayList<>();
+                    List<InlineKeyboardButton> upRow = new ArrayList<>();
+                    InlineKeyboardButton inlineKeyboardButtonNoComment = InlineKeyboardButton.builder()
+                            .callbackData(DELETE_BOOK + "/" + trip.getTripId())
+                            .text("Отменить бронь")
+                            .build();
+                    upRow.add(inlineKeyboardButtonNoComment);
+                    rowsLine.add(upRow);
+                    markup.setKeyboard(rowsLine);
+                    sendMessage.setReplyMarkup(markup);
+                    executeMessage(sendMessage);
+                }
+                log.info("Request a history of trips");
+            }
     }
 
     // Отправляет сообщения, первый параметр - id чата между ботом и пользователем, второй - сообщение
@@ -1079,6 +1112,48 @@ public class TelegramBot extends TelegramLongPollingBot {
         catch (TelegramApiException e) {
             log.error(ERROR_TEXT + e.getMessage());
         }
+    }
+    private void executeEditContactMessageText(String text, long chatId, long messageId, String userId) {
+        EditMessageText message = new EditMessageText();
+        message.setChatId(chatId);
+        message.setText(text);
+        message.setMessageId((int)messageId);
+        InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rowsLine = new ArrayList<>();
+        List<InlineKeyboardButton> firstRow = new ArrayList<>();
+        InlineKeyboardButton contact;
+        contact = InlineKeyboardButton.builder()
+                .url("tg://user?id=" + userId)
+                .text("Связаться через ТГ\uD83D\uDCE1")
+                .build();
+        firstRow.add(contact);
+        rowsLine.add(firstRow);
+        markup.setKeyboard(rowsLine);
+        message.setReplyMarkup(markup);
+        try{
+            execute(message);
+        }
+        catch (TelegramApiException e) {
+            log.error(ERROR_TEXT + e.getMessage());
+        }
+    }
+    private void executeEditContactDriverMessageText(String text, long chatId, String userId) {
+        SendMessage message = new SendMessage();
+        message.setChatId(chatId);
+        message.setText(text);
+        InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rowsLine = new ArrayList<>();
+        List<InlineKeyboardButton> firstRow = new ArrayList<>();
+        InlineKeyboardButton contact;
+        contact = InlineKeyboardButton.builder()
+                .url("tg://user?id=" + userId)
+                .text("Связаться через ТГ\uD83D\uDCE1")
+                .build();
+        firstRow.add(contact);
+        rowsLine.add(firstRow);
+        markup.setKeyboard(rowsLine);
+        message.setReplyMarkup(markup);
+        executeMessage(message);
     }
     private void executeMessage(SendMessage message) {
         try{
@@ -1136,34 +1211,50 @@ public class TelegramBot extends TelegramLongPollingBot {
             }
             sendMessage(1313359155L, textToSend);
         } else if (messageText.contains("/ban") && (checkAdmin(chatId))) {
-            var userName = EmojiParser.parseToUnicode(messageText.substring(messageText.indexOf(" ")).trim());
-            User user = getUserByUserName(userName);
-            banUser(chatId, user.getCharId());
+            var id = EmojiParser.parseToUnicode(messageText.substring(messageText.indexOf(" ")).trim());
+            banUser(chatId, Long.valueOf(id));
         }
         else if (messageText.contains("/unban") && (checkAdmin(chatId))) {
-            var userName = EmojiParser.parseToUnicode(messageText.substring(messageText.indexOf(" ")).trim());
-            User user = getUserByUserName(userName);
-            unbanUser(chatId, user.getCharId());
+            var id = EmojiParser.parseToUnicode(messageText.substring(messageText.indexOf(" ")).trim());
+            unbanUser(chatId, Long.valueOf(id));
         }
         else if (messageText.contains("/prem") && (checkAdmin(chatId))) {
-            var userName = EmojiParser.parseToUnicode(messageText.substring(messageText.indexOf(" ")).trim());
-            User user = getUserByUserName(userName);
-            addUserToWhiteLIst(chatId, user.getCharId());
+            var id = EmojiParser.parseToUnicode(messageText.substring(messageText.indexOf(" ")).trim());
+            addUserToWhiteLIst(chatId, Long.valueOf(id));
         }
         else if (messageText.contains("/unprem") && (checkAdmin(chatId))) {
-            var userName = EmojiParser.parseToUnicode(messageText.substring(messageText.indexOf(" ")).trim());
-            User user = getUserByUserName(userName);
-            removeUserFromWhiteLIst(chatId, user.getCharId());
+            var id = EmojiParser.parseToUnicode(messageText.substring(messageText.indexOf(" ")).trim());
+            removeUserFromWhiteLIst(chatId, Long.valueOf(id));
+        }
+        else if (messageText.contains("/remind") && (checkAdmin(chatId))) {
+            remindAboutTrips();
+            askAboutTrip();
+            deleteActiveTrips();
+            remindToPassengers();
+        }
+        else if (messageText.contains("/podpiska") && (checkAdmin(chatId))) {
+            String text = "Добрый день!\n" +
+                    "Напоминаю, что для использования бота необходимо подписаться на канал - " +
+                    "@bla_bla_krym_channel";
+            Iterable<User> all = userRepository.findAll();
+            int i = 0;
+            for (User user : all) {
+                if (!checkUserStatus(user.getCharId())) {
+                    sendMessage(user.getCharId(), text);
+                    i++;
+                }
+            }
+            sendMessage(chatId, i + " неподписаных пользователей получили напоминания");
         }
         else if (messageText.contains("/reset") && (checkAdmin(chatId))) {
-            var userName = EmojiParser.parseToUnicode(messageText.substring(messageText.indexOf(" ")).trim());
+            var id = EmojiParser.parseToUnicode(messageText.substring(messageText.indexOf(" ")).trim());
             try {
-                Long userId = getUserByUserName(userName).getCharId();
+                Long userId = Long.valueOf(id);
                 userStateRepository.deleteById(userId);
                 UserState state = new UserState();
                 state.setChatId(userId);
                 userStateRepository.save(state);
-                sendMessage(chatId, "Параметры пользователя @" + userName + " сброшены.");
+                sendMessage(chatId, "Параметры пользователя @" + id + " сброшены.");
             } catch (Exception e) {
                 sendMessage(chatId, "Данного пользователя нет в базе данных, либо" +
                         " что-то пошло не так, надо разбираться.");
@@ -1189,14 +1280,36 @@ public class TelegramBot extends TelegramLongPollingBot {
                     log.info("Request info");
                     break;
                 case "/find":
-                    if (isUserHasTripQuestion(chatId)) {
-                        showAllTrips(chatId);
-                        thisState.setShowing(true);
-                        userStateRepository.save(thisState);
-                    }
-                    else
-                        sendMessage(chatId, "Чтобы просматривать доступные поездки необходимо " +
-                                "создать заявку на поездку, для этого нажмите /start и выбирите \"Попутчик\"");
+//                    if (isUserInWhiteList(chatId)) {
+                        SendMessage message = new SendMessage();
+                        message.setChatId(chatId);
+                        message.setText("Что вы хотите посмотреть? Поездки или запросы?");
+                        InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+                        List<List<InlineKeyboardButton>> rowsLine = new ArrayList<>();
+                        List<InlineKeyboardButton> upRow = new ArrayList<>();
+                        InlineKeyboardButton inlineKeyboardButtonShowActiveTrips = InlineKeyboardButton.builder()
+                                .callbackData(SHOW_ACTIVE_TRIPS)
+                                .text("Активные поездки")
+                                .build();
+                        InlineKeyboardButton inlineKeyboardButtonShowFinalTrips = InlineKeyboardButton.builder()
+                                .callbackData(SHOW_FINAL_TRIPS)
+                                .text("Активные запросы")
+                                .build();
+                        upRow.add(inlineKeyboardButtonShowActiveTrips);
+                        upRow.add(inlineKeyboardButtonShowFinalTrips);
+                        rowsLine.add(upRow);
+                        markup.setKeyboard(rowsLine);
+                        message.setReplyMarkup(markup);
+                        executeMessage(message);
+//                    } else {
+//                        if (isUserHasTripQuestion(chatId)) {
+//                            showAllTrips(chatId);
+//                            thisState.setShowing(true);
+//                            userStateRepository.save(thisState);
+//                        } else
+//                            sendMessage(chatId, "Чтобы просматривать доступные поездки необходимо " +
+//                                    "создать заявку на поездку, для этого нажмите /start и выбирите \"Попутчик\"");
+//                    }
                     break;
                 default:
                     sendMessage(chatId, "Извините, такой команды не существует.");
@@ -1257,9 +1370,9 @@ public class TelegramBot extends TelegramLongPollingBot {
         } else if (callbackData.startsWith(UNWHITE_USER) && (checkAdmin(chatId))) {    //4
             Long userId = Long.valueOf(callbackData.split("/")[1]);
             removeUserFromWhiteLIst(chatId, userId);
-        } else if (callbackData.equals(SHOW_FINAL_TRIPS) && (checkAdmin(chatId))) {
+        } else if (callbackData.equals(SHOW_FINAL_TRIPS)) {
             showAllQuestionsToAdmin(chatId, messageId);
-        }else if (callbackData.startsWith(SHOW_SUITABLE_TRIPS)) {
+        } else if (callbackData.startsWith(SHOW_SUITABLE_TRIPS)) {
             Long questionId = Long.valueOf(callbackData.split("/")[1]);
             showSuitableTrips(chatId, questionId, messageId);
             thisState.setShowing(true);
@@ -1274,6 +1387,11 @@ public class TelegramBot extends TelegramLongPollingBot {
         }
         else if (callbackData.equals(SHOW_ACTIVE_TRIPS) && (checkAdmin(chatId))) {
             showAllTripsToAdmin(chatId, messageId);
+        }
+        else if(callbackData.equals(SHOW_ACTIVE_TRIPS) && (!checkAdmin(chatId))) {
+            thisState.setShowing(true);
+            userStateRepository.save(thisState);
+            showAllTrips(chatId);
         } else if (callbackData.startsWith(TO_BOOK) && thisState.isShowing()) {
             Long tripId = Long.valueOf(callbackData.split("/")[1]);
             TripActive trip = getTripActive(tripId);
@@ -1317,7 +1435,7 @@ public class TelegramBot extends TelegramLongPollingBot {
             user.setRating(driverRate);
             userRepository.save(user);
             executeEditMessageText("Спасибо за использование нашего бота, надеюсь мы еще не раз поможем" +
-                    "Вам добраться куда вы захотите", chatId, messageId);
+                    " Вам добраться куда вы захотите", chatId, messageId);
         }
         else if (callbackData.equals(START_TRIP) && (checkAdmin(chatId))) {
             String text = EmojiParser.parseToUnicode("Уважаемый шеф, " + ":sunglasses:"
@@ -1574,11 +1692,15 @@ public class TelegramBot extends TelegramLongPollingBot {
         tripActiveRepository.save(trip);
         userRepository.save(passenger);
         String text ="Поездка забронирована. Чтобы посмотреть детали поездки, зайдите в раздел " +
-                "/history, что бы связаться с водителем - напишите ему: @" + driverName;
-        executeEditMessageText(text, chatId, messageId);
-        sendMessage(trip.getDriverId(), "Мы нашли пассажира к вашей поездке!\n" +
-                "Можете прямо сейчас написать ему для уточнения деталей: @" + passenger.getUserName() + "" +
-                ", либо позже он сам напишет вам.");
+                "/history, что бы связаться с водителем - напишите ему: ";
+        SendMessage message = new SendMessage();
+        message.setText(text);
+        message.setChatId(chatId);
+        executeEditContactMessageText(text, chatId, messageId, String.valueOf(trip.getDriverId()));
+        String textToDriver = "Мы нашли пассажира к вашей поездке!\n" +
+                "Можете прямо сейчас написать ему для уточнения деталей" +
+                ", либо позже он сам напишет вам.";
+        executeEditContactDriverMessageText(textToDriver, trip.getDriverId(), String.valueOf(chatId));
     }
 
     private User getUserByChatId(long chatId) {
@@ -1677,7 +1799,15 @@ public class TelegramBot extends TelegramLongPollingBot {
         return message;
     }
     private void showAllQuestionsToAdmin(Long chatId, long messageId) {
-        String finalMes = "Чтобы удалить запрос, нажми \"Удалить\"";
+        String finalMes = "";
+        boolean isAdmin = false;
+        if (checkAdmin(chatId)) {
+            finalMes = "Чтобы удалить запрос, нажми \"Удалить\"";
+            isAdmin = true;
+        } else {
+            finalMes = "Вы можете написать попутчику, который ищет поездку используя ссылку на его телеграмм" +
+                    ", но мы рекомендуем все же составить поездку!)";
+        }
         EditMessageText sendMessage = new EditMessageText();
         sendMessage.setText(finalMes);
         sendMessage.setChatId(chatId);
@@ -1690,11 +1820,14 @@ public class TelegramBot extends TelegramLongPollingBot {
         var trips = tripRepository.findAll();
         for (ActiveTripQuestions trip : trips) {
             if ((trip.isActive())) {
+                User author = getUserByChatId(trip.getPassengerId());
                 String month = trip.getDateFormat().split("\\.")[0];
                 String thisMonth = months.get(Integer.parseInt(month));
                 String secondSide = trip.getDateFormat().split("\\.")[1];
                 String day = secondSide.split("/")[0];
-                StringBuilder stringBuilder = new StringBuilder(EmojiParser.parseToUnicode("Дата" +
+                StringBuilder stringBuilder = new StringBuilder(EmojiParser.parseToUnicode(
+                        "Автор заявки - @" + author.getUserName() + "\n" +
+                        "Дата" +
                         " поездки: \n" +
                         "Месяц" + ":date:" +": " + thisMonth + ", " +
                         "День: " + day +"\n"));
@@ -1702,17 +1835,19 @@ public class TelegramBot extends TelegramLongPollingBot {
                 SendMessage message = new SendMessage();
                 message.setText(String.valueOf(stringBuilder));
                 message.setChatId(chatId);
-                InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
-                List<List<InlineKeyboardButton>> rowsLine = new ArrayList<>();
-                List<InlineKeyboardButton> upRow = new ArrayList<>();
-                InlineKeyboardButton deleteTrip = InlineKeyboardButton.builder()
-                        .callbackData(DELETE_QUESTION + "/" + trip.getTripId())
-                        .text("Удалить")
-                        .build();
-                upRow.add(deleteTrip);
-                rowsLine.add(upRow);
-                markup.setKeyboard(rowsLine);
-                message.setReplyMarkup(markup);
+                if (isAdmin) {
+                    InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+                    List<List<InlineKeyboardButton>> rowsLine = new ArrayList<>();
+                    List<InlineKeyboardButton> upRow = new ArrayList<>();
+                    InlineKeyboardButton deleteTrip = InlineKeyboardButton.builder()
+                            .callbackData(DELETE_QUESTION + "/" + trip.getTripId())
+                            .text("Удалить")
+                            .build();
+                    upRow.add(deleteTrip);
+                    rowsLine.add(upRow);
+                    markup.setKeyboard(rowsLine);
+                    message.setReplyMarkup(markup);
+                }
                 executeMessage(message);
             }
         }
@@ -1734,6 +1869,18 @@ public class TelegramBot extends TelegramLongPollingBot {
         for (TripActive trip : trips) {
             if ((trip.isActive())            ) {
                 SendMessage message = sendTripInfo(chatId, trip);
+                User driver = getUserByChatId(trip.getDriverId());
+                StringBuilder stringBuilder = new StringBuilder(message.getText());
+                stringBuilder.append("\n Водитель - @" + driver.getUserName() + "\n");
+                if (trip.tripHasPassengers()) {
+                    String finalMess = "Пассажиры: ";
+                    stringBuilder.append(finalMess);
+                    List<String> passengersNames = trip.getPassengersNames();
+                    for (int i = 0; i < passengersNames.size(); i++) {
+                        stringBuilder.append("@" + passengersNames.get(i) + " ");
+                    }
+                }
+                message.setText(String.valueOf(stringBuilder));
                 message.setChatId(chatId);
                 InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
                 List<List<InlineKeyboardButton>> rowsLine = new ArrayList<>();
@@ -1873,13 +2020,25 @@ public class TelegramBot extends TelegramLongPollingBot {
     }
     @Scheduled(cron = "${interval-in-cron}")
     private void checkCompletedTrips() throws ParseException {
+        remindAboutTrips();
         askAboutTrip();
         deleteActiveTrips();
-        remindAboutTrips();
+        remindToPassengers();
         sendMessage(1313359155, "Завершенные поездки или поездки с истекшим временем были удалены.");
     }
 
-    private void askAboutTrip() throws ParseException {
+    private void remindToPassengers() {
+        Iterable<ActiveTripQuestions> tripQuestions = tripRepository.findAll();
+        String info = "Напоминаю Вам, что вы также можете открыть вкладку \"Меню\", " +
+                "перейти в \"Доступные поездки\" и, возможно, вы найдете подходящую для себя поездку в другой" +
+                "день или из соседнего населенного пункта (к соседнему населенному пункту)." +
+                " Спасибо за внимание!)";
+        for (ActiveTripQuestions trip : tripQuestions) {
+            sendMessage(trip.getPassengerId(), info);
+        }
+    }
+
+    private void askAboutTrip() {
         Calendar cal = Calendar.getInstance();
         int thisDay = cal.get(Calendar.DAY_OF_MONTH);
         int thisMonth = cal.get(Calendar.MONTH);
@@ -1888,50 +2047,52 @@ public class TelegramBot extends TelegramLongPollingBot {
         int tripMonth;
         Iterable<TripActive> tripsActive = tripActiveRepository.findAll();
         for (TripActive trip : tripsActive) {
-            tripDate = trip.getTripDate().split("/")[0];
-            tripMonth = Integer.parseInt(tripDate.split("\\.")[0]);
-            tripDay = Integer.parseInt(tripDate.split("\\.")[1]);
-            if (!trip.isActive()) {
-                tripActiveRepository.deleteById(trip.getTripId());
-            }
-            if ((tripMonth == thisMonth && tripDay < thisDay) || (tripMonth < thisMonth)) {
-                List<String> passengersId = trip.getPassengers();
-                for (int i = 0; i < passengersId.size(); i++) {
-                    User user = getUserByChatId(Long.parseLong(passengersId.get(i).split("_")[0]));
-                    SendMessage message = new SendMessage();
-                    message.setChatId(user.getCharId());
-                    message.setText("У Вас вчера была запланирована поездка из " + trip.getCityFrom() +
-                            ", в " + trip.getCityTo() + ", подскажите пожалуйста состоялась" +
-                            " ли она? Ваш ответ поможет улучшить работу сервиса и определить порядочность водителя.");
-                    InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
-                    List<List<InlineKeyboardButton>> rowsLine = new ArrayList<>();
-                    List<InlineKeyboardButton> upRow = new ArrayList<>();
-                    List<InlineKeyboardButton> downRow = new ArrayList<>();
-                    InlineKeyboardButton tripWas = InlineKeyboardButton.builder()
-                            .callbackData(TRIP_WAS + "/" + trip.getDriverId())
-                            .text("Состоялась")
-                            .build();
-                    InlineKeyboardButton tripNotWas = InlineKeyboardButton.builder()
-                            .callbackData(TRIP_NOT_WAS + "/" + trip.getDriverId())
-                            .text("Не состоялась")
-                            .build();
-                    InlineKeyboardButton skipAsk = InlineKeyboardButton.builder()
-                            .callbackData(SKIP_ASK)
-                            .text("Пропустить")
-                            .build();
-                    upRow.add(tripWas);
-                    upRow.add(tripNotWas);
-                    rowsLine.add(upRow);
-                    downRow.add(skipAsk);
-                    rowsLine.add(downRow);
-                    markup.setKeyboard(rowsLine);
-                    message.setReplyMarkup(markup);
-                    executeMessage(message);
+            if (trip.tripHasPassengers()) {
+                tripDate = trip.getTripDate().split("/")[0];
+                tripMonth = Integer.parseInt(tripDate.split("\\.")[0]);
+                tripDay = Integer.parseInt(tripDate.split("\\.")[1]);
+                if (!trip.isActive()) {
+                    tripActiveRepository.deleteById(trip.getTripId());
+                }
+                if ((tripMonth == thisMonth && tripDay < thisDay) || (tripMonth < thisMonth)) {
+                    List<String> passengersId = trip.getPassengers();
+                    for (int i = 0; i < passengersId.size(); i++) {
+                        User user = getUserByChatId(Long.parseLong(passengersId.get(i).split("_")[0]));
+                        SendMessage message = new SendMessage();
+                        message.setChatId(user.getCharId());
+                        message.setText("У Вас вчера была запланирована поездка из " + trip.getCityFrom() +
+                                ", в " + trip.getCityTo() + ", подскажите пожалуйста состоялась" +
+                                " ли она? Ваш ответ поможет улучшить работу сервиса и определить порядочность водителя.");
+                        InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+                        List<List<InlineKeyboardButton>> rowsLine = new ArrayList<>();
+                        List<InlineKeyboardButton> upRow = new ArrayList<>();
+                        List<InlineKeyboardButton> downRow = new ArrayList<>();
+                        InlineKeyboardButton tripWas = InlineKeyboardButton.builder()
+                                .callbackData(TRIP_WAS + "/" + trip.getDriverId())
+                                .text("Состоялась")
+                                .build();
+                        InlineKeyboardButton tripNotWas = InlineKeyboardButton.builder()
+                                .callbackData(TRIP_NOT_WAS + "/" + trip.getDriverId())
+                                .text("Не состоялась")
+                                .build();
+                        InlineKeyboardButton skipAsk = InlineKeyboardButton.builder()
+                                .callbackData(SKIP_ASK)
+                                .text("Пропустить")
+                                .build();
+                        upRow.add(tripWas);
+                        upRow.add(tripNotWas);
+                        rowsLine.add(upRow);
+                        downRow.add(skipAsk);
+                        rowsLine.add(downRow);
+                        markup.setKeyboard(rowsLine);
+                        message.setReplyMarkup(markup);
+                        executeMessage(message);
+                    }
                 }
             }
         }
     }
-    private void deleteActiveTrips() throws ParseException {
+    private void deleteActiveTrips() {
         Calendar cal = Calendar.getInstance();
         int thisDay = cal.get(Calendar.DAY_OF_MONTH);
         int thisMonth = cal.get(Calendar.MONTH);
@@ -1944,12 +2105,20 @@ public class TelegramBot extends TelegramLongPollingBot {
         Iterable<ActiveTripQuestions> trips = tripRepository.findAll();
         List<Long> deletedIds = new ArrayList<>();
         for (ActiveTripQuestions trip : trips) {
-            questDate = trip.getDateFormat().split("/")[0];
-            questMonth = Integer.parseInt(questDate.split("\\.")[0]);
-            questDay = Integer.parseInt(questDate.split("\\.")[1]);
-            if ((questMonth == thisMonth && questDay < thisDay) || (questMonth < thisMonth)) {
-                System.out.println("Here2");
+            if (trip.isActive()) {
+                questDate = trip.getDateFormat().split("/")[0];
+                questMonth = Integer.parseInt(questDate.split("\\.")[0]);
+                questDay = Integer.parseInt(questDate.split("\\.")[1]);
+                if ((questMonth == thisMonth && questDay < thisDay) || (questMonth < thisMonth)) {
+                    System.out.println("Here2");
+                    deletedIds.add(trip.getTripId());
+                }
+            } else {
                 deletedIds.add(trip.getTripId());
+                userStateRepository.deleteById(trip.getPassengerId());
+                UserState state = new UserState();
+                state.setChatId(trip.getPassengerId());
+                userStateRepository.save(state);
             }
         }
         for (Long id: deletedIds) {
@@ -1958,24 +2127,35 @@ public class TelegramBot extends TelegramLongPollingBot {
         Iterable<TripActive> tripsActive = tripActiveRepository.findAll();
         List<Long> deletedIdsTrips = new ArrayList<>();
         for (TripActive trip : tripsActive) {
-            tripDate = trip.getTripDate().split("/")[0];
-            tripMonth = Integer.parseInt(tripDate.split("\\.")[0]);
-            tripDay = Integer.parseInt(tripDate.split("\\.")[1]);
-            if ((tripMonth == thisMonth && tripDay < thisDay) || (tripMonth < thisMonth)) {
-                List<String> passengersId = trip.getPassengers();
-                for (int i = 0; i < passengersId.size(); i++) {
-                    User user = getUserByChatId(Long.parseLong(passengersId.get(i).split("_")[0]));
-                    user.deleteMyBookingTrip(String.valueOf(trip.getTripId()));
-                    userRepository.save(user);
+            if (trip.isActive()) {
+                tripDate = trip.getTripDate().split("/")[0];
+                System.out.println(tripDate);
+                tripMonth = Integer.parseInt(tripDate.split("\\.")[0]);
+                tripDay = Integer.parseInt(tripDate.split("\\.")[1]);
+                if ((tripMonth == thisMonth && tripDay < thisDay) || (tripMonth < thisMonth)) {
+                    if (trip.tripHasPassengers()) {
+                        List<String> passengersId = trip.getPassengers();
+                        for (int i = 0; i < passengersId.size(); i++) {
+                            User user = getUserByChatId(Long.parseLong(passengersId.get(i).split("_")[0]));
+                            user.deleteMyBookingTrip(String.valueOf(trip.getTripId()));
+                            userRepository.save(user);
+                        }
+                    }
+                    deletedIdsTrips.add(trip.getTripId());
                 }
+            } else {
                 deletedIdsTrips.add(trip.getTripId());
+                userStateRepository.deleteById(trip.getDriverId());
+                UserState state = new UserState();
+                state.setChatId(trip.getDriverId());
+                userStateRepository.save(state);
             }
         }
         for (Long id: deletedIdsTrips) {
             tripActiveRepository.deleteById(id);
         }
     }
-    private void remindAboutTrips() throws ParseException {
+    private void remindAboutTrips() {
         Calendar cal = Calendar.getInstance();
         int thisDay = cal.get(Calendar.DAY_OF_MONTH);
         int thisMonth = cal.get(Calendar.MONTH);
@@ -1984,19 +2164,21 @@ public class TelegramBot extends TelegramLongPollingBot {
         int tripDay;
         Iterable<TripActive> tripsActive = tripActiveRepository.findAll();
         for (TripActive trip : tripsActive) {
-            tripDate = trip.getTripDate().split("/")[0];
-            tripMonth = Integer.parseInt(tripDate.split("\\.")[0]);
-            tripDay = Integer.parseInt(tripDate.split("\\.")[1]);
-            if (tripMonth == thisMonth && tripDay == thisDay) {
-                List<String> passengersId = trip.getPassengers();
-                for (int i = 0; i < passengersId.size(); i++) {
-                    User user = getUserByChatId(Long.parseLong(passengersId.get(i).split("_")[0]));
-                    String time = trip.getTripDate().split("/")[1];
-                    String driverName = findUserNameById(trip.getDriver());
-                    sendMessage(user.getCharId(), "Напоминаю Вам о спланированной сегодня поездке в "
-                            + time +", для связи можете написать водителю: @" + driverName);
-                    sendMessage(trip.getDriverId(), "Напоминаю Вам о спланированной сегодня поездке в "
-                            + time);
+            if (trip.tripHasPassengers()) {
+                tripDate = trip.getTripDate().split("/")[0];
+                tripMonth = Integer.parseInt(tripDate.split("\\.")[0]);
+                tripDay = Integer.parseInt(tripDate.split("\\.")[1]);
+                if (tripMonth == thisMonth && tripDay == thisDay) {
+                    List<String> passengersId = trip.getPassengers();
+                    for (int i = 0; i < passengersId.size(); i++) {
+                        User user = getUserByChatId(Long.parseLong(passengersId.get(i).split("_")[0]));
+                        String time = trip.getTripDate().split("/")[1];
+                        String driverName = findUserNameById(trip.getDriver());
+                        sendMessage(user.getCharId(), "Напоминаю Вам о спланированной сегодня поездке в "
+                                + time + ", для связи можете написать водителю: @" + driverName);
+                        sendMessage(trip.getDriverId(), "Напоминаю Вам о спланированной сегодня поездке в "
+                                + time);
+                    }
                 }
             }
         }
@@ -2140,6 +2322,17 @@ public class TelegramBot extends TelegramLongPollingBot {
     }
     private void sendInfoPhoto(Long chatId) {
         File file = new File("help.jpg");
+        SendPhoto sendPhoto = new SendPhoto();
+        sendPhoto.setPhoto(new InputFile(file));
+        sendPhoto.setChatId(chatId);
+        try {
+            execute(sendPhoto);
+        } catch (TelegramApiException e) {
+            e.printStackTrace();
+        }
+    }
+    private void sendInfoPhotoTo(Long chatId) {
+        File file = new File("helpTo.jpg");
         SendPhoto sendPhoto = new SendPhoto();
         sendPhoto.setPhoto(new InputFile(file));
         sendPhoto.setChatId(chatId);

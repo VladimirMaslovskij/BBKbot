@@ -48,12 +48,14 @@ public class User {
         return this.reviewCount;
     }
     public List<Long> getMyBookingTrips() {
-        List<String> tripsStr = List.of(this.myBookingTrips.split("/"));
-        List<Long> trips = new ArrayList<>();
-        for (int i = 0; i < tripsStr.size(); i++) {
-            trips.add(Long.valueOf(tripsStr.get(i)));
-        }
-        return trips;
+        if (this.myBookingTrips != null && !this.myBookingTrips.equals("")) {
+            List<String> tripsStr = List.of(this.myBookingTrips.split("/"));
+            List<Long> trips = new ArrayList<>();
+            for (int i = 0; i < tripsStr.size(); i++) {
+                trips.add(Long.valueOf(tripsStr.get(i)));
+            }
+            return trips;
+        } return null;
     }
     public void setMyBookingTrips(String myBookingTrips) {
         this.myBookingTrips = myBookingTrips;
